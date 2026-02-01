@@ -300,7 +300,7 @@
         return `
             <div class="auth">
                 ${ScreenHeader({title: 'Авторизация', subtitle: ''})}
-                <div class="auth__spacer"></div>
+                <div class="auth__spacer auth__spacer--top"></div>
 
                 <form class="auth__form" data-action="login">
                     <label class="authField">
@@ -320,14 +320,14 @@
                             <div class="authField__label">Пароль</div>
                             <input class="authField__input" name="password" type="password" placeholder="••••••••" required />
                         </div>
-                        <div class="authField__icon"></div>
+                        <div class="authField__icon authField__icon--empty"></div>
                     </label>
 
                     <button class="btn btn--primary btn--wide" type="submit">Войти</button>
                     <button class="link link--accent" type="button" data-action="nav" data-to="/forgot">Забыли пароль?</button>
                 </form>
 
-                <div class="auth__spacer"></div>
+                <div class="auth__spacer auth__spacer--bottom"></div>
             </div>
         `;
     }
