@@ -2022,7 +2022,7 @@
     window.addEventListener('hashchange', () => render());
 
     if (!window.location.hash) {
-        navigate('/login');
+        navigate('/home');
     } else {
         render();
     }
