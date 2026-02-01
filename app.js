@@ -2,6 +2,7 @@
 
 (function runPrototype() {
     const STORAGE_KEY = 'moodFoodProtoStateV1';
+    const AUTH_DISABLED = true; // временно: авторизация не требуется
 
     const appEl = document.getElementById('app');
     const toastEl = document.getElementById('toast');
@@ -308,7 +309,7 @@
                             <div class="authField__label">Email</div>
                             <input class="authField__input" name="email" type="email" value="${escapeHtml(
                                 email
-                            )}" placeholder="example@mail.com" required />
+                            )}" placeholder="example@mail.com" />
                         </div>
                         <div class="authField__icon ${emailLooksOk ? 'authField__icon--ok' : ''}">${
                             emailLooksOk ? '✓' : ''
@@ -318,7 +319,7 @@
                     <label class="authField">
                         <div class="authField__meta">
                             <div class="authField__label">Пароль</div>
-                            <input class="authField__input" name="password" type="password" placeholder="••••••••" required />
+                            <input class="authField__input" name="password" type="password" placeholder="••••••••" />
                         </div>
                         <div class="authField__icon authField__icon--empty"></div>
                     </label>
@@ -1479,6 +1480,7 @@
     }
 
     function guard(route) {
+        if (AUTH_DISABLED) return true;
         if (state.authenticated) return true;
         if (route.path === '/login' || route.path === '/forgot') return true;
         navigate('/login');
