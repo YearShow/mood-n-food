@@ -10,6 +10,8 @@
     const categories = mock.categories || [];
     const dishes = mock.dishes || [];
     const mockUser = mock.user || null;
+    const employees = mock.employees || [];
+    const shifts = mock.shifts || [];
 
     function nowIso() {
         return new Date().toISOString();
@@ -91,6 +93,11 @@
             resetSentTo: '',
             tables,
             orders: {}, // by tableId -> {openedAt, sentAt?, guests: {guestId: {items: [{dishId, qty, note}]}}}
+            reservations: [], // post-MVP: [{id, tableId, date, time, guestsCount, name, status}]
+            schedule: {
+                employees,
+                shifts
+            }, // post-MVP: график смен/отчётность
             loyaltyMembers: mock.loyaltyMembers || [],
             ui: {
                 pendingAdd: null // {tableId, guestId}
@@ -98,7 +105,62 @@
         };
     }
 
-    let state = loadState() || defaultState();
+    function normalizeState(loaded) {
+        const base = defaultState();
+        const s = loaded && typeof loaded === 'object' ? loaded : base;
+
+        // Top-level
+        s.version = 1;
+        s.authenticated = Boolean(s.authenticated);
+        s.user = s.user || null;
+        s.lastLoginEmail = typeof s.lastLoginEmail === 'string' ? s.lastLoginEmail : '';
+        s.resetSentTo = typeof s.resetSentTo === 'string' ? s.resetSentTo : '';
+
+        // Tables
+        s.tables = Array.isArray(s.tables) ? s.tables : base.tables;
+        s.tables = s.tables.map((t, idx) => ({
+            id: t?.id || `t-${idx + 1}`,
+            number: t?.number ?? idx + 1,
+            guests: Array.isArray(t?.guests) ? t.guests : []
+        }));
+
+        // Orders
+        s.orders = s.orders && typeof s.orders === 'object' ? s.orders : {};
+        Object.values(s.orders).forEach((order) => {
+            if (!order || typeof order !== 'object') return;
+            order.guests = order.guests && typeof order.guests === 'object' ? order.guests : {};
+            if (!order.payment || typeof order.payment !== 'object') order.payment = {status: 'none', splitMode: 'byGuests'};
+            Object.values(order.guests).forEach((g) => {
+                if (!g || typeof g !== 'object') return;
+                g.items = Array.isArray(g.items) ? g.items : [];
+                g.items.forEach((it) => {
+                    if (!it || typeof it !== 'object') return;
+                    if (typeof it.qty !== 'number') it.qty = 1;
+                    if (typeof it.note !== 'string') it.note = '';
+                    if (typeof it.course !== 'number') it.course = 1;
+                    if (typeof it.status !== 'string') it.status = order.sentAt ? 'cooking' : 'new';
+                    if (typeof it.createdAt !== 'string') it.createdAt = order.openedAt || nowIso();
+                });
+            });
+        });
+
+        // post-MVP
+        s.reservations = Array.isArray(s.reservations) ? s.reservations : [];
+        s.schedule = s.schedule && typeof s.schedule === 'object' ? s.schedule : {};
+        s.schedule.employees = Array.isArray(s.schedule.employees) ? s.schedule.employees : base.schedule.employees;
+        s.schedule.shifts = Array.isArray(s.schedule.shifts) ? s.schedule.shifts : base.schedule.shifts;
+
+        // Loyalty
+        s.loyaltyMembers = Array.isArray(s.loyaltyMembers) ? s.loyaltyMembers : base.loyaltyMembers;
+
+        // UI
+        s.ui = s.ui && typeof s.ui === 'object' ? s.ui : {};
+        s.ui.pendingAdd = s.ui.pendingAdd || null;
+
+        return s;
+    }
+
+    let state = normalizeState(loadState());
 
     function setState(mutator) {
         const next = typeof mutator === 'function' ? mutator(structuredClone(state)) : mutator;
@@ -122,9 +184,11 @@
                 })(),
                 userId: mockUser ? mockUser.id : 'u-0',
                 loyaltyMemberId: null,
+                payment: {status: 'none', splitMode: 'byGuests'},
                 guests: {}
             };
         }
+        if (!state.orders[tableId].payment) state.orders[tableId].payment = {status: 'none', splitMode: 'byGuests'};
         return state.orders[tableId];
     }
 
@@ -156,6 +220,59 @@
         return {sum, itemsCount};
     }
 
+    function getTodayYmd() {
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    function getTableStatus(tableId) {
+        // post-MVP: свободен/заказ открыт/забронирован/ожидает оплату
+        const order = state.orders[tableId];
+        const totals = computeTotals(tableId);
+
+        // 1) Ожидает оплату (если сформирован счет и есть сумма)
+        if (order?.payment?.status === 'awaiting' && totals.sum > 0) return 'awaiting_payment';
+
+        // 2) Открыт / отправлен
+        if (order) return order.sentAt ? 'order_sent' : 'order_open';
+
+        // 3) Забронирован (на сегодня, любой статус active)
+        const today = getTodayYmd();
+        const hasReservation = (state.reservations || []).some(
+            (r) => r.tableId === tableId && r.date === today && (r.status || 'active') === 'active'
+        );
+        if (hasReservation) return 'reserved';
+
+        return 'free';
+    }
+
+    function statusLabel(key) {
+        switch (key) {
+            case 'awaiting_payment':
+                return 'Ожидает оплату';
+            case 'order_sent':
+                return 'Заказ отправлен';
+            case 'order_open':
+                return 'Заказ открыт';
+            case 'reserved':
+                return 'Забронирован';
+            case 'free':
+            default:
+                return 'Свободен';
+        }
+    }
+
+    function statusPillHtml(statusKey) {
+        if (statusKey === 'awaiting_payment') return `<div class="pill pill--warn">Ожидает оплату</div>`;
+        if (statusKey === 'order_sent') return `<div class="pill pill--ok">Отправлен</div>`;
+        if (statusKey === 'order_open') return `<div class="pill">Открыт</div>`;
+        if (statusKey === 'reserved') return `<div class="pill pill--info">Бронь</div>`;
+        return `<div class="pill">Свободен</div>`;
+    }
+
     function ScreenHeader({title, subtitle, backTo, rightHtml}) {
         const backBtn =
             backTo != null
@@ -178,34 +295,39 @@
     }
 
     function LoginScreen() {
+        const email = state.lastLoginEmail || '';
+        const emailLooksOk = /\S+@\S+\.\S+/.test(email);
         return `
-            <div class="screen">
-                ${ScreenHeader({title: 'Авторизация', subtitle: 'MVP: вход официанта/сотрудника'})}
-                <div class="card">
-                    <p class="hint">
-                        По фич-листу: логин (e-mail), пароль, переход на главный экран с данными пользователя.
-                    </p>
-                </div>
-                <form class="form" data-action="login">
-                    <div class="field">
-                        <div class="label">Логин (e-mail)</div>
-                        <input class="input" name="email" type="email" value="${escapeHtml(state.lastLoginEmail || '')}" placeholder="name@example.com" required />
-                    </div>
-                    <div class="field">
-                        <div class="label">Пароль</div>
-                        <input class="input" name="password" type="password" placeholder="••••••••" required />
-                    </div>
-                    <div class="btnRow">
-                        <button class="btn btn--primary" type="submit">ВОЙТИ</button>
-                        <button class="btn" type="button" data-action="nav" data-to="/forgot">Восстановить доступ</button>
-                    </div>
+            <div class="auth">
+                ${ScreenHeader({title: 'Авторизация', subtitle: ''})}
+                <div class="auth__spacer"></div>
+
+                <form class="auth__form" data-action="login">
+                    <label class="authField">
+                        <div class="authField__meta">
+                            <div class="authField__label">Email</div>
+                            <input class="authField__input" name="email" type="email" value="${escapeHtml(
+                                email
+                            )}" placeholder="example@mail.com" required />
+                        </div>
+                        <div class="authField__icon ${emailLooksOk ? 'authField__icon--ok' : ''}">${
+                            emailLooksOk ? '✓' : ''
+                        }</div>
+                    </label>
+
+                    <label class="authField">
+                        <div class="authField__meta">
+                            <div class="authField__label">Пароль</div>
+                            <input class="authField__input" name="password" type="password" placeholder="••••••••" required />
+                        </div>
+                        <div class="authField__icon"></div>
+                    </label>
+
+                    <button class="btn btn--primary btn--wide" type="submit">Войти</button>
+                    <button class="link link--accent" type="button" data-action="nav" data-to="/forgot">Забыли пароль?</button>
                 </form>
-                <div class="card">
-                    <div class="card__title">Заметка</div>
-                    <div class="hint">
-                        Это прототип: пароль не проверяется, данные пользователя берём из моков.
-                    </div>
-                </div>
+
+                <div class="auth__spacer"></div>
             </div>
         `;
     }
@@ -213,22 +335,25 @@
     function ForgotPasswordScreen() {
         return `
             <div class="screen">
-                ${ScreenHeader({title: 'Восстановить доступ', subtitle: 'MVP: временный пароль на почту', backTo: '/login'})}
+                ${ScreenHeader({title: 'Восстановить доступ', subtitle: '', backTo: '/login'})}
+                <div class="card">
+                    <div class="hint">MVP: отправка временного пароля на почту (в прототипе — мок).</div>
+                </div>
                 <form class="form" data-action="reset">
                     <div class="field">
-                        <div class="label">E-mail</div>
-                        <input class="input" name="email" type="email" value="${escapeHtml(state.lastLoginEmail || '')}" placeholder="name@example.com" required />
+                        <div class="label">Email</div>
+                        <input class="input" name="email" type="email" value="${escapeHtml(state.lastLoginEmail || '')}" placeholder="example@mail.com" required />
                     </div>
                     <div class="btnRow">
-                        <button class="btn btn--primary" type="submit">Отправить временный пароль</button>
-                        <button class="btn" type="button" data-action="nav" data-to="/login">Назад к входу</button>
+                        <button class="btn btn--primary btn--wide" type="submit">Отправить</button>
+                        <button class="btn" type="button" data-action="nav" data-to="/login">Назад</button>
                     </div>
                 </form>
                 ${
                     state.resetSentTo
                         ? `<div class="card"><div class="ok">Временный пароль отправлен на: ${escapeHtml(
                               state.resetSentTo
-                          )}</div><div class="hint">В прототипе это просто мок-сообщение.</div></div>`
+                          )}</div><div class="hint">В прототипе это просто сообщение.</div></div>`
                         : ''
                 }
             </div>
@@ -241,8 +366,8 @@
             <div class="screen">
                 ${ScreenHeader({
                     title: 'Главный экран',
-                    subtitle: 'MVP: разделы приложения',
-                    rightHtml: `<button class="btn" data-action="logout">Выйти</button>`
+                    subtitle: '',
+                    rightHtml: `<button class="btn btn--ghost" data-action="logout">Выйти</button>`
                 })}
 
                 <div class="card">
@@ -272,22 +397,26 @@
                         <div class="tile__title">Столы</div>
                         <p class="tile__desc">Гости, заказы, заметки для кухни</p>
                     </div>
-                    <div class="tile" aria-disabled="true">
+                    <div class="tile" data-action="nav" data-to="/schedule">
                         <div class="tile__title">Расписание</div>
-                        <p class="tile__desc">post‑MVP: график смен</p>
+                        <p class="tile__desc">post‑MVP: график смен и отчётность</p>
                     </div>
                     <div class="tile" data-action="nav" data-to="/loyalty">
                         <div class="tile__title">Программа лояльности</div>
                         <p class="tile__desc">Поиск/регистрация участника</p>
                     </div>
+                    <div class="tile" data-action="nav" data-to="/reservations">
+                        <div class="tile__title">Бронирования</div>
+                        <p class="tile__desc">post‑MVP: календарь и бронь столов</p>
+                    </div>
+                    <div class="tile" data-action="nav" data-to="/payments">
+                        <div class="tile__title">Оплата</div>
+                        <p class="tile__desc">post‑MVP: счёт и разделение</p>
+                    </div>
                 </div>
 
                 <div class="card">
-                    <div class="card__title">post‑MVP (заглушки)</div>
-                    <div class="hint">
-                        Статусы столов, бронирования, оплата, пуши, статус готовности блюд, отчётность — в этом прототипе не
-                        реализованы, но могут быть добавлены отдельными экранами‑описаниями.
-                    </div>
+                    <div class="hint">Прототип: часть сценариев на мок‑данных, без бэкенда.</div>
                 </div>
             </div>
         `;
@@ -296,8 +425,7 @@
     function MenuCategoriesScreen(query) {
         const mode = query.mode || 'view';
         const pending = state.ui.pendingAdd;
-        const subtitle =
-            mode === 'add' && pending ? 'Выберите категорию (режим добавления в заказ)' : 'MVP: категории, блюда, стоп‑лист';
+        const subtitle = mode === 'add' && pending ? 'Добавление в заказ' : '';
         const backTo = mode === 'add' ? `/order?table=${encodeURIComponent(pending?.tableId || '')}&guest=${encodeURIComponent(pending?.guestId || '')}` : '/home';
 
         return `
@@ -331,7 +459,7 @@
         const items = dishes.filter((d) => d.categoryId === catId);
 
         const backTo = `/menu${mode === 'add' ? '?mode=add' : ''}`;
-        const subtitle = mode === 'add' ? 'Выберите блюдо для добавления гостю' : 'MVP: стоп‑лист, состав, время готовности';
+        const subtitle = mode === 'add' ? 'Выберите блюдо' : '';
 
         return `
             <div class="screen">
@@ -412,7 +540,7 @@
     function TablesScreen() {
         return `
             <div class="screen">
-                ${ScreenHeader({title: 'Столы', subtitle: 'MVP: выбрать стол, добавить гостя, открыть заказ', backTo: '/home'})}
+                ${ScreenHeader({title: 'Столы', subtitle: '', backTo: '/home'})}
 
                 <div class="card">
                     <div class="card__title">MVP-допущение</div>
@@ -425,13 +553,9 @@
                     ${state.tables
                         .map((t) => {
                             const guestsCount = (t.guests || []).length;
-                            const order = state.orders[t.id];
                             const totals = computeTotals(t.id);
-                            const status = order?.sentAt ? 'Отправлен' : order ? 'Открыт' : 'Нет заказа';
-                            const statusPill =
-                                status === 'Отправлен'
-                                    ? `<div class="pill pill--ok">Отправлен</div>`
-                                    : `<div class="pill">${escapeHtml(status)}</div>`;
+                            const statusKey = getTableStatus(t.id);
+                            const statusPill = statusPillHtml(statusKey);
 
                             return `
                                 <div class="row" data-action="nav" data-to="/table?id=${encodeURIComponent(t.id)}">
@@ -466,6 +590,7 @@
         const order = state.orders[tableId];
         const totals = computeTotals(tableId);
         const sent = Boolean(order?.sentAt);
+        const statusKey = getTableStatus(tableId);
 
         const guestsHtml =
             (table.guests || []).length === 0
@@ -506,14 +631,14 @@
                     title: `Стол №${table.number}`,
                     subtitle: `ID ресторана: ${escapeHtml(mockUser?.restaurantId || 'r-000')}`,
                     backTo: '/tables',
-                    rightHtml: sent ? `<div class="pill pill--ok">Заказ отправлен</div>` : ''
+                    rightHtml: statusPillHtml(statusKey)
                 })}
 
                 <div class="card">
                     <div class="card__title">Итоги заказа</div>
                     <div class="kv">
                         <div class="kv__row"><div class="kv__k">Статус</div><div class="kv__v">${escapeHtml(
-                            sent ? 'Отправлен на кухню' : order ? 'Открыт' : 'Нет заказа'
+                            statusLabel(statusKey)
                         )}</div></div>
                         <div class="kv__row"><div class="kv__k">Блюд</div><div class="kv__v">${escapeHtml(
                             totals.itemsCount
@@ -524,7 +649,7 @@
                     </div>
                 </div>
 
-                <div class="btnRow">
+                <div class="actionsBar">
                     <button class="btn btn--primary" data-action="addGuest" data-table="${escapeHtml(tableId)}">Добавить гостя</button>
                     <button class="btn" data-action="openOrder" data-table="${escapeHtml(tableId)}">Открыть заказ</button>
                     ${
@@ -601,32 +726,75 @@
                                     const price = d ? d.price : 0;
                                     const sum = price * (it.qty || 1);
                                     return `
-                                        <div class="card">
-                                            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px">
+                                        <div class="itemCard">
+                                            <div class="itemCard__top">
                                                 <div style="min-width:0">
-                                                    <div style="font-weight:800; font-size:14px">${escapeHtml(
-                                                        title
-                                                    )}</div>
-                                                    <div class="hint">${formatMoneyRub(price)} · Кол-во: ${escapeHtml(
-                                        it.qty || 1
-                                    )} · Итого: ${formatMoneyRub(sum)}</div>
+                                                    <div class="itemCard__title">${escapeHtml(title)}</div>
+                                                    <div class="itemCard__meta">
+                                                        <span class="price">${formatMoneyRub(price)}</span>
+                                                        <span class="muted"> · </span>
+                                                        <span class="muted">Кол‑во: ${escapeHtml(it.qty || 1)}</span>
+                                                        <span class="muted"> · </span>
+                                                        <span class="muted">Итого: ${formatMoneyRub(sum)}</span>
+                                                    </div>
                                                 </div>
-                                                <button class="btn btn--ghost" data-action="removeItem" data-table="${escapeHtml(
-                                                    tableId
-                                                )}" data-guest="${escapeHtml(activeGuestId)}" data-idx="${escapeHtml(
+                                                <div class="itemCard__badges">
+                                                    ${dishStatusPill(it.status || 'new')}
+                                                    <div class="pill">Подача ${escapeHtml(it.course || 1)}</div>
+                                                    <button class="btn btn--ghost btn--sm" data-action="removeItem" data-table="${escapeHtml(
+                                                        tableId
+                                                    )}" data-guest="${escapeHtml(activeGuestId)}" data-idx="${escapeHtml(
                                         idx
                                     )}">Удалить</button>
+                                                </div>
                                             </div>
+
                                             <div class="divider"></div>
-                                            <div class="field">
+
+                                            <div class="controlsGrid">
+                                                <div class="field">
+                                                    <div class="label">Подача</div>
+                                                    <select class="select" data-action="setCourse" data-table="${escapeHtml(
+                                                        tableId
+                                                    )}" data-guest="${escapeHtml(activeGuestId)}" data-idx="${escapeHtml(idx)}" ${
+                                                        sent ? 'disabled' : ''
+                                                    }>
+                                                        <option value="1" ${(it.course || 1) === 1 ? 'selected' : ''}>1</option>
+                                                        <option value="2" ${(it.course || 1) === 2 ? 'selected' : ''}>2</option>
+                                                        <option value="3" ${(it.course || 1) === 3 ? 'selected' : ''}>3</option>
+                                                    </select>
+                                                </div>
+                                                <div class="field">
+                                                    <div class="label">Статус</div>
+                                                    <select class="select" data-action="setItemStatus" data-table="${escapeHtml(
+                                                        tableId
+                                                    )}" data-guest="${escapeHtml(activeGuestId)}" data-idx="${escapeHtml(idx)}">
+                                                        <option value="new" ${(it.status || 'new') === 'new' ? 'selected' : ''}>${escapeHtml(
+                                                            dishStatusLabel('new')
+                                                        )}</option>
+                                                        <option value="sent" ${(it.status || 'new') === 'sent' ? 'selected' : ''}>${escapeHtml(
+                                                            dishStatusLabel('sent')
+                                                        )}</option>
+                                                        <option value="cooking" ${(it.status || 'new') === 'cooking' ? 'selected' : ''}>${escapeHtml(
+                                                            dishStatusLabel('cooking')
+                                                        )}</option>
+                                                        <option value="ready" ${(it.status || 'new') === 'ready' ? 'selected' : ''}>${escapeHtml(
+                                                            dishStatusLabel('ready')
+                                                        )}</option>
+                                                        <option value="served" ${(it.status || 'new') === 'served' ? 'selected' : ''}>${escapeHtml(
+                                                            dishStatusLabel('served')
+                                                        )}</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div class="field" style="margin-top:10px">
                                                 <div class="label">Заметка для кухни</div>
                                                 <textarea class="textarea" data-action="updateNote" data-table="${escapeHtml(
                                                     tableId
                                                 )}" data-guest="${escapeHtml(activeGuestId)}" data-idx="${escapeHtml(
                                         idx
-                                    )}" placeholder="Например: без лука, соус отдельно">${escapeHtml(
-                                        it.note || ''
-                                    )}</textarea>
+                                    )}" placeholder="Например: без лука, соус отдельно">${escapeHtml(it.note || '')}</textarea>
                                             </div>
                                         </div>
                                     `;
@@ -654,13 +822,16 @@
                 ${
                     guest
                         ? `
-                            <div class="btnRow">
+                            <div class="actionsBar">
                                 <button class="btn btn--primary" data-action="startAdd" data-table="${escapeHtml(
                                     tableId
                                 )}" data-guest="${escapeHtml(activeGuestId)}" ${sent ? 'disabled' : ''}>Добавить блюда</button>
                                 <button class="btn btn--success" data-action="sendOrder" data-table="${escapeHtml(
                                     tableId
                                 )}" ${sent ? 'disabled' : ''}>Направить заказ</button>
+                                <button class="btn" data-action="simulateReady" data-table="${escapeHtml(
+                                    tableId
+                                )}" ${sent ? '' : 'disabled'}>Симулировать готовность</button>
                             </div>
                         `
                         : ''
@@ -669,7 +840,7 @@
                 ${itemsHtml}
 
                 <div class="card">
-                    <div class="card__title">Данные заказа (MVP)</div>
+                    <div class="card__title">Данные заказа</div>
                     <div class="kv">
                         <div class="kv__row"><div class="kv__k">ID ресторана</div><div class="kv__v">${escapeHtml(
                             order.restaurantId
@@ -687,7 +858,9 @@
                             totals.sum
                         )}</div></div>
                     </div>
-                    <div class="hint">В прототипе “направить заказ” — мок‑успех (без кухни).</div>
+                    <div class="hint">
+                        MVP: “направить заказ” — мок‑успех. post‑MVP: можно менять статусы блюд и симулировать “пуш” о готовности.
+                    </div>
                 </div>
             </div>
         `;
@@ -697,7 +870,7 @@
         const tableId = query.table || '';
         const guestId = query.guest || '';
 
-        const contextSubtitle = tableId && guestId ? 'Привязка участника к гостю за столом' : 'MVP: поиск и регистрация';
+        const contextSubtitle = tableId && guestId ? 'Привязка к гостю' : '';
         const backTo = tableId ? `/table?id=${encodeURIComponent(tableId)}` : '/home';
 
         return `
@@ -889,6 +1062,411 @@
         `;
     }
 
+    function dishStatusLabel(status) {
+        switch (status) {
+            case 'sent':
+                return 'Отправлено';
+            case 'cooking':
+                return 'Готовится';
+            case 'ready':
+                return 'Готово';
+            case 'served':
+                return 'Подано';
+            case 'new':
+            default:
+                return 'Новое';
+        }
+    }
+
+    function dishStatusPill(status) {
+        if (status === 'ready') return `<div class="pill pill--ok">Готово</div>`;
+        if (status === 'cooking') return `<div class="pill pill--info">Готовится</div>`;
+        if (status === 'sent') return `<div class="pill">Отправлено</div>`;
+        if (status === 'served') return `<div class="pill">Подано</div>`;
+        return `<div class="pill">Новое</div>`;
+    }
+
+    function ReservationsScreen(query) {
+        const date = query.date || getTodayYmd();
+        const list = (state.reservations || []).filter((r) => r.date === date && (r.status || 'active') !== 'cancelled');
+
+        return `
+            <div class="screen">
+                ${ScreenHeader({
+                    title: 'Бронирования',
+                    subtitle: '',
+                    backTo: '/home',
+                    rightHtml: `<button class="btn btn--primary" data-action="nav" data-to="/reservations/new?date=${encodeURIComponent(
+                        date
+                    )}">Новая бронь</button>`
+                })}
+
+                <form class="form" data-action="reservationsFilter">
+                    <div class="field">
+                        <div class="label">Дата</div>
+                        <input class="input" name="date" type="date" value="${escapeHtml(date)}" />
+                    </div>
+                    <div class="btnRow">
+                        <button class="btn" type="submit">Показать</button>
+                    </div>
+                </form>
+
+                <div class="card">
+                    <div class="card__title">Список</div>
+                    ${
+                        list.length === 0
+                            ? `<div class="hint">На выбранную дату бронирований нет.</div>`
+                            : `<div class="list">
+                                ${list
+                                    .map((r) => {
+                                        const table = getTableById(r.tableId);
+                                        return `
+                                            <div class="row">
+                                                <div class="row__main">
+                                                    <div class="row__title">Стол №${escapeHtml(
+                                                        table?.number ?? '?'
+                                                    )} · ${escapeHtml(r.time)}</div>
+                                                    <div class="row__meta">${escapeHtml(r.name)} · гостей: ${escapeHtml(
+                                                        r.guestsCount
+                                                    )}</div>
+                                                </div>
+                                                <button class="btn btn--ghost btn--sm" data-action="cancelReservation" data-res="${escapeHtml(
+                                                    r.id
+                                                )}">Отменить</button>
+                                            </div>
+                                        `;
+                                    })
+                                    .join('')}
+                            </div>`
+                    }
+                </div>
+
+                <div class="card">
+                    <div class="hint">
+                        В прототипе бронь влияет на статус стола “Бронь” (на сегодня) до отмены.
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function ReservationsNewScreen(query) {
+        const date = query.date || getTodayYmd();
+        return `
+            <div class="screen">
+                ${ScreenHeader({title: 'Новая бронь', subtitle: '', backTo: `/reservations?date=${encodeURIComponent(date)}`})}
+
+                <form class="form" data-action="createReservation">
+                    <div class="field">
+                        <div class="label">Дата</div>
+                        <input class="input" name="date" type="date" value="${escapeHtml(date)}" required />
+                    </div>
+                    <div class="field">
+                        <div class="label">Время</div>
+                        <input class="input" name="time" type="time" value="19:00" required />
+                    </div>
+                    <div class="field">
+                        <div class="label">Стол</div>
+                        <select class="select" name="tableId" required>
+                            ${(state.tables || [])
+                                .map((t) => `<option value="${escapeHtml(t.id)}">Стол №${escapeHtml(t.number)}</option>`)
+                                .join('')}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <div class="label">Количество гостей</div>
+                        <input class="input" name="guestsCount" type="number" min="1" value="2" required />
+                    </div>
+                    <div class="field">
+                        <div class="label">Имя гостя</div>
+                        <input class="input" name="name" placeholder="Иван" required />
+                    </div>
+                    <div class="btnRow">
+                        <button class="btn btn--primary" type="submit">Создать бронь</button>
+                        <button class="btn" type="button" data-action="nav" data-to="/reservations?date=${encodeURIComponent(
+                            date
+                        )}">Отмена</button>
+                    </div>
+                </form>
+            </div>
+        `;
+    }
+
+    function computeGuestTotalsForTable(tableId) {
+        const table = getTableById(tableId);
+        const order = state.orders[tableId];
+        if (!table || !order) return [];
+        const guests = table.guests || [];
+        return guests.map((g) => {
+            const items = order.guests?.[g.id]?.items || [];
+            let sum = 0;
+            items.forEach((it) => {
+                const d = dishes.find((x) => x.id === it.dishId);
+                const price = d ? d.price : 0;
+                sum += price * (it.qty || 1);
+            });
+            return {guest: g, sum};
+        });
+    }
+
+    function paymentStatusPill(order) {
+        const s = order?.payment?.status || 'none';
+        if (s === 'paid') return `<div class="pill pill--ok">Оплачен</div>`;
+        if (s === 'awaiting') return `<div class="pill pill--warn">Ожидает оплату</div>`;
+        return `<div class="pill">Нет</div>`;
+    }
+
+    function PaymentsScreen() {
+        const rows = state.tables
+            .map((t) => {
+                const order = state.orders[t.id];
+                const totals = computeTotals(t.id);
+                if (!order && totals.sum === 0) return null;
+                return {table: t, order, totals};
+            })
+            .filter(Boolean);
+
+        return `
+            <div class="screen">
+                ${ScreenHeader({title: 'Оплата', subtitle: '', backTo: '/home'})}
+
+                <div class="card">
+                    <div class="card__title">Столы со счетами</div>
+                    ${
+                        rows.length === 0
+                            ? `<div class="hint">Пока нет открытых заказов. Создайте заказ на столе.</div>`
+                            : `<div class="list">
+                                ${rows
+                                    .map(({table, order, totals}) => {
+                                        return `
+                                            <div class="row" data-action="nav" data-to="/payments/table?id=${encodeURIComponent(
+                                                table.id
+                                            )}">
+                                                <div class="row__main">
+                                                    <div class="row__title">Стол №${escapeHtml(table.number)}</div>
+                                                    <div class="row__meta">Сумма: ${formatMoneyRub(totals.sum)}</div>
+                                                </div>
+                                                ${paymentStatusPill(order)}
+                                            </div>
+                                        `;
+                                    })
+                                    .join('')}
+                            </div>`
+                    }
+                </div>
+            </div>
+        `;
+    }
+
+    function PaymentsTableScreen(query) {
+        const tableId = query.id;
+        const table = getTableById(tableId);
+        if (!table) {
+            return `
+                <div class="screen">
+                    ${ScreenHeader({title: 'Оплата', subtitle: 'Стол не найден', backTo: '/payments'})}
+                    <div class="card">Нет данных.</div>
+                </div>
+            `;
+        }
+
+        const order = ensureOrder(tableId);
+        const totals = computeTotals(tableId);
+        const guestTotals = computeGuestTotalsForTable(tableId);
+        const splitMode = order.payment?.splitMode || 'byGuests';
+        const guestsCount = Math.max(guestTotals.length, 1);
+        const even = totals.sum > 0 ? Math.round((totals.sum / guestsCount) * 100) / 100 : 0;
+
+        return `
+            <div class="screen">
+                ${ScreenHeader({
+                    title: `Оплата — стол №${table.number}`,
+                    subtitle: '',
+                    backTo: '/payments',
+                    rightHtml: paymentStatusPill(order)
+                })}
+
+                <div class="card">
+                    <div class="card__title">Итоги</div>
+                    <div class="kv kv--big">
+                        <div class="kv__row"><div class="kv__k">Сумма</div><div class="kv__v">${formatMoneyRub(
+                            totals.sum
+                        )}</div></div>
+                        <div class="kv__row"><div class="kv__k">Гостей</div><div class="kv__v">${escapeHtml(
+                            guestTotals.length
+                        )}</div></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card__title">Счёт</div>
+                    <div class="actionsBar">
+                        <button class="btn btn--primary" data-action="makeBill" data-table="${escapeHtml(
+                            tableId
+                        )}" ${totals.sum === 0 ? 'disabled' : ''}>Сформировать счёт</button>
+                        <button class="btn btn--success" data-action="markPaid" data-table="${escapeHtml(
+                            tableId
+                        )}" ${order.payment?.status !== 'awaiting' ? 'disabled' : ''}>Отметить оплату</button>
+                    </div>
+                    <div class="divider"></div>
+                    <div class="field">
+                        <div class="label">Разделить счёт</div>
+                        <select class="select" data-action="setSplitMode" data-table="${escapeHtml(tableId)}">
+                            <option value="byGuests" ${splitMode === 'byGuests' ? 'selected' : ''}>По гостям</option>
+                            <option value="evenly" ${splitMode === 'evenly' ? 'selected' : ''}>Поровну</option>
+                        </select>
+                    </div>
+                    <div class="hint">В прототипе разделение — расчётное (без печати/эквайринга).</div>
+                </div>
+
+                <div class="card">
+                    <div class="card__title">Расчёт</div>
+                    ${
+                        splitMode === 'evenly'
+                            ? `<div class="hint">Поровну: ${formatMoneyRub(even)} на гостя (${guestsCount}).</div>`
+                            : `<div class="list">
+                                ${guestTotals
+                                    .map(
+                                        ({guest, sum}) => `
+                                            <div class="row">
+                                                <div class="row__main">
+                                                    <div class="row__title">Гость ${escapeHtml(guest.number)}</div>
+                                                    <div class="row__meta">Сумма: ${formatMoneyRub(sum)}</div>
+                                                </div>
+                                                <div class="pill">По заказу</div>
+                                            </div>
+                                        `
+                                    )
+                                    .join('')}
+                            </div>`
+                    }
+                </div>
+            </div>
+        `;
+    }
+
+    function parseTimeToMinutes(hhmm) {
+        const [hh, mm] = String(hhmm || '00:00').split(':');
+        const h = Number(hh);
+        const m = Number(mm);
+        if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
+        return h * 60 + m;
+    }
+
+    function shiftDurationHours(shift) {
+        const start = parseTimeToMinutes(shift.start);
+        const end = parseTimeToMinutes(shift.end);
+        const mins = Math.max(0, end - start);
+        return Math.round((mins / 60) * 10) / 10;
+    }
+
+    function ScheduleScreen(query) {
+        const date = query.date || getTodayYmd();
+        const employeesById = new Map((state.schedule?.employees || []).map((e) => [e.id, e]));
+        const list = (state.schedule?.shifts || []).filter((s) => s.date === date);
+
+        return `
+            <div class="screen">
+                ${ScreenHeader({title: 'Расписание', subtitle: '', backTo: '/home'})}
+
+                <form class="form" data-action="scheduleFilter">
+                    <div class="field">
+                        <div class="label">Дата</div>
+                        <input class="input" name="date" type="date" value="${escapeHtml(date)}" />
+                    </div>
+                    <div class="btnRow">
+                        <button class="btn" type="submit">Показать</button>
+                    </div>
+                </form>
+
+                <div class="card">
+                    <div class="card__title">Смены</div>
+                    ${
+                        list.length === 0
+                            ? `<div class="hint">На эту дату смен нет (мок).</div>`
+                            : `<div class="list">
+                                ${list
+                                    .map((s) => {
+                                        const emp = employeesById.get(s.employeeId);
+                                        const hours = shiftDurationHours(s);
+                                        return `
+                                            <div class="row" data-action="nav" data-to="/schedule/employee?id=${encodeURIComponent(
+                                                s.employeeId
+                                            )}">
+                                                <div class="row__main">
+                                                    <div class="row__title">${escapeHtml(emp?.fullName || s.employeeId)}</div>
+                                                    <div class="row__meta">${escapeHtml(s.start)}–${escapeHtml(
+                                            s.end
+                                        )} · ${escapeHtml(hours)} ч</div>
+                                                </div>
+                                                <div class="pill">Отчёт</div>
+                                            </div>
+                                        `;
+                                    })
+                                    .join('')}
+                            </div>`
+                    }
+                </div>
+            </div>
+        `;
+    }
+
+    function ScheduleEmployeeScreen(query) {
+        const employeeId = query.id;
+        const emp = (state.schedule?.employees || []).find((e) => e.id === employeeId);
+        const list = (state.schedule?.shifts || []).filter((s) => s.employeeId === employeeId);
+        const totalHours = list.reduce((acc, s) => acc + shiftDurationHours(s), 0);
+
+        return `
+            <div class="screen">
+                ${ScreenHeader({
+                    title: 'Отчётность',
+                    subtitle: emp ? `${emp.fullName} · ${emp.role}` : employeeId,
+                    backTo: '/schedule'
+                })}
+
+                <div class="card">
+                    <div class="card__title">Итого</div>
+                    <div class="kv">
+                        <div class="kv__row"><div class="kv__k">Смен</div><div class="kv__v">${escapeHtml(
+                            list.length
+                        )}</div></div>
+                        <div class="kv__row"><div class="kv__k">Часов</div><div class="kv__v">${escapeHtml(
+                            totalHours
+                        )}</div></div>
+                    </div>
+                    <div class="hint">В прототипе отчётность упрощена (без KPI/выручки).</div>
+                </div>
+
+                <div class="card">
+                    <div class="card__title">Список смен</div>
+                    ${
+                        list.length === 0
+                            ? `<div class="hint">Нет смен (мок).</div>`
+                            : `<div class="list">
+                                ${list
+                                    .map((s) => {
+                                        const hours = shiftDurationHours(s);
+                                        return `
+                                            <div class="row">
+                                                <div class="row__main">
+                                                    <div class="row__title">${escapeHtml(s.date)}</div>
+                                                    <div class="row__meta">${escapeHtml(s.start)}–${escapeHtml(
+                                            s.end
+                                        )} · ${escapeHtml(hours)} ч</div>
+                                                </div>
+                                                <div class="pill">Смена</div>
+                                            </div>
+                                        `;
+                                    })
+                                    .join('')}
+                            </div>`
+                    }
+                </div>
+            </div>
+        `;
+    }
+
     function NotFoundScreen(path) {
         return `
             <div class="screen">
@@ -942,6 +1520,24 @@
                 break;
             case '/loyalty':
                 html = LoyaltySearchScreen(route.query);
+                break;
+            case '/reservations':
+                html = ReservationsScreen(route.query);
+                break;
+            case '/reservations/new':
+                html = ReservationsNewScreen(route.query);
+                break;
+            case '/payments':
+                html = PaymentsScreen();
+                break;
+            case '/payments/table':
+                html = PaymentsTableScreen(route.query);
+                break;
+            case '/schedule':
+                html = ScheduleScreen(route.query);
+                break;
+            case '/schedule/employee':
+                html = ScheduleEmployeeScreen(route.query);
                 break;
             case '/loyalty/register':
                 html = LoyaltyRegisterScreen(route.query);
@@ -1056,7 +1652,14 @@
         setState((s) => {
             const order = s.orders[pending.tableId] || ensureOrder(pending.tableId);
             order.guests[pending.guestId] = order.guests[pending.guestId] || {items: []};
-            order.guests[pending.guestId].items.push({dishId, qty: 1, note: ''});
+            order.guests[pending.guestId].items.push({
+                dishId,
+                qty: 1,
+                note: '',
+                course: 1, // post-MVP: очередность подачи
+                status: order.sentAt ? 'cooking' : 'new', // post-MVP: статус блюда
+                createdAt: nowIso()
+            });
             return s;
         });
         toast('Блюдо добавлено', 'ok');
@@ -1089,11 +1692,129 @@
         setState((s) => {
             const order = s.orders[tableId] || ensureOrder(tableId);
             order.sentAt = nowIso();
+            // post-MVP: при отправке считаем, что кухня приняла заказ и блюда "готовятся"
+            Object.values(order.guests || {}).forEach((g) => {
+                (g.items || []).forEach((it) => {
+                    if (!it.status || it.status === 'new' || it.status === 'sent') it.status = 'cooking';
+                });
+            });
             s.ui.pendingAdd = null;
             return s;
         });
         toast('Заказ направлен на кухню (мок)', 'ok');
         navigate(`/table?id=${encodeURIComponent(tableId)}`);
+    }
+
+    function handleSetCourse(tableId, guestId, idx, course) {
+        setState((s) => {
+            const order = s.orders[tableId];
+            const it = order?.guests?.[guestId]?.items?.[idx];
+            if (!it) return s;
+            it.course = course;
+            return s;
+        });
+    }
+
+    function handleSetItemStatus(tableId, guestId, idx, status) {
+        setState((s) => {
+            const order = s.orders[tableId];
+            const it = order?.guests?.[guestId]?.items?.[idx];
+            if (!it) return s;
+            it.status = status;
+            return s;
+        });
+    }
+
+    function handleSimulateReady(tableId) {
+        let readyDishTitle = null;
+        setState((s) => {
+            const order = s.orders[tableId];
+            if (!order) return s;
+            // ищем первое блюдо, которое можно "довести" до готовности
+            for (const guest of Object.values(order.guests || {})) {
+                for (const it of guest.items || []) {
+                    if (it.status === 'cooking' || it.status === 'sent') {
+                        it.status = 'ready';
+                        const d = dishes.find((x) => x.id === it.dishId);
+                        readyDishTitle = d ? d.title : it.dishId;
+                        return s;
+                    }
+                }
+            }
+            return s;
+        });
+        toast(readyDishTitle ? `Пуш (мок): готово — ${readyDishTitle}` : 'Нет блюд в готовке', readyDishTitle ? 'ok' : 'warn');
+        // остаёмся на экране заказа
+    }
+
+    function handleCreateReservation(form) {
+        const date = form.date.value;
+        const time = form.time.value;
+        const tableId = form.tableId.value;
+        const guestsCount = Number(form.guestsCount.value || 0) || 1;
+        const name = form.name.value.trim();
+
+        let conflict = false;
+        setState((s) => {
+            conflict = (s.reservations || []).some(
+                (r) => (r.status || 'active') === 'active' && r.tableId === tableId && r.date === date && r.time === time
+            );
+            if (conflict) return s;
+            s.reservations = [
+                {id: id('res'), tableId, date, time, guestsCount, name, status: 'active', createdAt: nowIso()},
+                ...(s.reservations || [])
+            ];
+            return s;
+        });
+
+        if (conflict) {
+            toast('На это время стол уже забронирован', 'err');
+            return;
+        }
+
+        toast('Бронь создана', 'ok');
+        navigate(`/reservations?date=${encodeURIComponent(date)}`);
+    }
+
+    function handleCancelReservation(resId) {
+        setState((s) => {
+            const r = (s.reservations || []).find((x) => x.id === resId);
+            if (r) r.status = 'cancelled';
+            return s;
+        });
+        toast('Бронь отменена', 'warn');
+    }
+
+    function handleMakeBill(tableId) {
+        setState((s) => {
+            const order = s.orders[tableId] || ensureOrder(tableId);
+            order.payment = order.payment || {status: 'none', splitMode: 'byGuests'};
+            order.payment.status = 'awaiting';
+            order.payment.createdAt = nowIso();
+            return s;
+        });
+        toast('Счёт сформирован', 'ok');
+    }
+
+    function handleMarkPaid(tableId) {
+        setState((s) => {
+            const order = s.orders[tableId];
+            if (!order) return s;
+            order.payment = order.payment || {status: 'none', splitMode: 'byGuests'};
+            order.payment.status = 'paid';
+            order.payment.paidAt = nowIso();
+            return s;
+        });
+        toast('Оплата отмечена', 'ok');
+    }
+
+    function handleSetSplitMode(tableId, splitMode) {
+        setState((s) => {
+            const order = s.orders[tableId] || ensureOrder(tableId);
+            order.payment = order.payment || {status: 'none', splitMode: 'byGuests'};
+            order.payment.splitMode = splitMode;
+            return s;
+        });
     }
 
     function handleAttachLoyalty(memberId, tableId, guestId) {
@@ -1193,6 +1914,26 @@
             return;
         }
 
+        if (action === 'simulateReady') {
+            handleSimulateReady(el.getAttribute('data-table'));
+            return;
+        }
+
+        if (action === 'cancelReservation') {
+            handleCancelReservation(el.getAttribute('data-res'));
+            return;
+        }
+
+        if (action === 'makeBill') {
+            handleMakeBill(el.getAttribute('data-table'));
+            return;
+        }
+
+        if (action === 'markPaid') {
+            handleMarkPaid(el.getAttribute('data-table'));
+            return;
+        }
+
         if (action === 'attachLoyalty') {
             handleAttachLoyalty(el.getAttribute('data-member'), el.getAttribute('data-table'), el.getAttribute('data-guest'));
             return;
@@ -1204,6 +1945,31 @@
         if (!(el instanceof HTMLTextAreaElement)) return;
         if (el.getAttribute('data-action') !== 'updateNote') return;
         handleUpdateNote(el.getAttribute('data-table'), el.getAttribute('data-guest'), Number(el.getAttribute('data-idx')), el.value);
+    });
+
+    document.addEventListener('change', (e) => {
+        const el = e.target;
+        if (!(el instanceof HTMLSelectElement)) return;
+        const action = el.getAttribute('data-action');
+        if (!action) return;
+
+        if (action === 'setCourse') {
+            handleSetCourse(el.getAttribute('data-table'), el.getAttribute('data-guest'), Number(el.getAttribute('data-idx')), Number(el.value));
+            toast('Очередность подачи обновлена', 'ok');
+            return;
+        }
+
+        if (action === 'setItemStatus') {
+            handleSetItemStatus(el.getAttribute('data-table'), el.getAttribute('data-guest'), Number(el.getAttribute('data-idx')), el.value);
+            toast(`Статус блюда: ${dishStatusLabel(el.value)}`, 'ok');
+            return;
+        }
+
+        if (action === 'setSplitMode') {
+            handleSetSplitMode(el.getAttribute('data-table'), el.value);
+            toast('Режим разделения счета обновлён', 'ok');
+            return;
+        }
     });
 
     document.addEventListener('submit', (e) => {
@@ -1230,6 +1996,23 @@
 
         if (action === 'loyaltyRegister') {
             handleLoyaltyRegister(form);
+            return;
+        }
+
+        if (action === 'createReservation') {
+            handleCreateReservation(form);
+            return;
+        }
+
+        if (action === 'reservationsFilter') {
+            const date = form.date.value || getTodayYmd();
+            navigate(`/reservations?date=${encodeURIComponent(date)}`);
+            return;
+        }
+
+        if (action === 'scheduleFilter') {
+            const date = form.date.value || getTodayYmd();
+            navigate(`/schedule?date=${encodeURIComponent(date)}`);
             return;
         }
     });

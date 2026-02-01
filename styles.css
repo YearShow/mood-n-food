@@ -1,17 +1,21 @@
 :root {
-    --bg: #0b0f1a;
-    --panel: #111827;
-    --panel2: #0f172a;
-    --text: #e5e7eb;
-    --muted: #9ca3af;
-    --border: rgba(255, 255, 255, 0.08);
-    --accent: #7c3aed;
-    --accent2: #22c55e;
+    --bg: #0d121b;
+    --panel: #1b2332;
+    --panel2: #232c3d;
+    --text: rgba(255, 255, 255, 0.92);
+    --muted: rgba(255, 255, 255, 0.6);
+    --border: rgba(255, 255, 255, 0.14);
+    --accent: #e07a1f; /* orange */
+    --accentHover: #f08a2f;
+    --success: #57d36d;
     --danger: #ef4444;
     --warning: #f59e0b;
-    --shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
-    --radius: 16px;
-    --radiusSm: 12px;
+    --shadow: 0 28px 80px rgba(0, 0, 0, 0.55);
+    --radius: 18px;
+    --radiusSm: 14px;
+    --fieldBg: rgba(255, 255, 255, 0.16);
+    --surface: rgba(0, 0, 0, 0.08);
+    --surface2: rgba(255, 255, 255, 0.06);
     --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
 }
 
@@ -27,9 +31,8 @@ body {
 body {
     margin: 0;
     font-family: var(--font);
-    background: radial-gradient(1200px 900px at 40% 0%, rgba(124, 58, 237, 0.22), transparent 65%),
-        radial-gradient(900px 700px at 90% 20%, rgba(34, 197, 94, 0.18), transparent 70%),
-        var(--bg);
+    background: radial-gradient(1200px 900px at 40% 0%, rgba(255, 255, 255, 0.06), transparent 60%),
+        radial-gradient(900px 700px at 90% 10%, rgba(255, 255, 255, 0.05), transparent 65%), var(--bg);
     color: var(--text);
 }
 
@@ -40,7 +43,7 @@ body {
     display: flex;
     flex-direction: column;
     box-shadow: var(--shadow);
-    background: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(15, 23, 42, 0.95));
+    background: linear-gradient(180deg, #2a3140 0%, #1b2332 70%, #182030 100%);
 }
 
 .app-topbar {
@@ -48,11 +51,12 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 14px 14px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
     backdrop-filter: blur(10px);
     position: sticky;
     top: 0;
     z-index: 10;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0));
 }
 
 .app-topbar__brand {
@@ -65,7 +69,7 @@ body {
 .app-topbar__logo {
     width: 28px;
     height: 28px;
-    border-radius: 10px;
+    border-radius: 999px;
     border: 1px solid var(--border);
     background: rgba(255, 255, 255, 0.04);
     object-fit: contain;
@@ -86,18 +90,19 @@ body {
     color: var(--muted);
     padding: 4px 10px;
     border-radius: 999px;
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.04);
 }
 
 .app-main {
-    padding: 14px;
+    padding: 18px;
     flex: 1;
 }
 
 .screen {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 16px;
 }
 
 .screen__header {
@@ -116,7 +121,7 @@ body {
 
 .screen__title {
     font-weight: 800;
-    font-size: 18px;
+    font-size: 22px;
     margin: 0;
     line-height: 1.2;
 }
@@ -130,11 +135,11 @@ body {
 .btn {
     appearance: none;
     border: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(255, 255, 255, 0.06);
     color: var(--text);
-    border-radius: 12px;
-    padding: 10px 12px;
-    font-weight: 600;
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-weight: 700;
     cursor: pointer;
     transition: transform 80ms ease, border-color 120ms ease, background 120ms ease;
 }
@@ -148,13 +153,18 @@ body {
 }
 
 .btn--primary {
-    background: linear-gradient(135deg, rgba(124, 58, 237, 0.95), rgba(124, 58, 237, 0.6));
-    border-color: rgba(124, 58, 237, 0.6);
+    background: var(--accent);
+    border-color: rgba(224, 122, 31, 0.85);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.btn--primary:hover {
+    background: var(--accentHover);
 }
 
 .btn--success {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.92), rgba(34, 197, 94, 0.55));
-    border-color: rgba(34, 197, 94, 0.6);
+    background: rgba(87, 211, 109, 0.22);
+    border-color: rgba(87, 211, 109, 0.55);
 }
 
 .btn--ghost {
@@ -162,8 +172,8 @@ body {
 }
 
 .btn--danger {
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.9), rgba(239, 68, 68, 0.55));
-    border-color: rgba(239, 68, 68, 0.5);
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.45);
 }
 
 .btn[disabled] {
@@ -181,7 +191,7 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 12px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface);
 }
 
 .card__title {
@@ -215,15 +225,25 @@ body {
 .tiles {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 12px;
 }
 
 .tile {
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 12px;
-    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 16px;
+    padding: 14px;
+    background: var(--surface2);
     cursor: pointer;
+    transition: transform 90ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.tile:hover {
+    border-color: rgba(255, 255, 255, 0.26);
+    background: rgba(255, 255, 255, 0.075);
+}
+
+.tile:active {
+    transform: translateY(1px);
 }
 
 .tile__title {
@@ -265,13 +285,20 @@ body {
 .select,
 .textarea {
     width: 100%;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.12);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    background: var(--fieldBg);
     color: var(--text);
-    padding: 10px 12px;
+    padding: 14px 14px;
     outline: none;
     font-size: 14px;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+    border-color: rgba(224, 122, 31, 0.95);
+    box-shadow: 0 0 0 2px rgba(224, 122, 31, 0.18);
 }
 
 .textarea {
@@ -292,14 +319,24 @@ body {
 }
 
 .row {
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 16px;
+    padding: 12px 14px;
+    background: var(--surface2);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    transition: transform 90ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.row:hover {
+    border-color: rgba(255, 255, 255, 0.24);
+    background: rgba(255, 255, 255, 0.075);
+}
+
+.row:active {
+    transform: translateY(1px);
 }
 
 .row__main {
@@ -323,12 +360,13 @@ body {
 }
 
 .pill {
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 999px;
     padding: 4px 10px;
     font-size: 12px;
     color: var(--muted);
     white-space: nowrap;
+    background: rgba(0, 0, 0, 0.06);
 }
 
 .pill--stop {
@@ -343,6 +381,18 @@ body {
     background: rgba(34, 197, 94, 0.12);
 }
 
+.pill--warn {
+    color: #fde68a;
+    border-color: rgba(245, 158, 11, 0.45);
+    background: rgba(245, 158, 11, 0.12);
+}
+
+.pill--info {
+    color: #bfdbfe;
+    border-color: rgba(59, 130, 246, 0.45);
+    background: rgba(59, 130, 246, 0.12);
+}
+
 .tabs {
     display: flex;
     gap: 8px;
@@ -351,19 +401,19 @@ body {
 }
 
 .tab {
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 999px;
     padding: 8px 10px;
     font-weight: 700;
     font-size: 12px;
     cursor: pointer;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.06);
     white-space: nowrap;
 }
 
 .tab[aria-selected="true"] {
-    border-color: rgba(124, 58, 237, 0.7);
-    background: rgba(124, 58, 237, 0.18);
+    border-color: rgba(224, 122, 31, 0.75);
+    background: rgba(224, 122, 31, 0.14);
 }
 
 .divider {
@@ -381,7 +431,7 @@ body {
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 10px 12px;
-    background: rgba(17, 24, 39, 0.95);
+    background: rgba(0, 0, 0, 0.55);
     box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
     color: var(--text);
     opacity: 0;
@@ -403,7 +453,203 @@ body {
 }
 
 .ok {
-    color: #bbf7d0;
+    color: rgba(87, 211, 109, 0.95);
+}
+
+.link {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 8px 10px;
+    font-weight: 800;
+    cursor: pointer;
+    text-align: center;
+}
+
+.link--accent {
+    color: var(--accent);
+}
+
+.link--accent:hover {
+    color: var(--accentHover);
+}
+
+.auth {
+    min-height: calc(100vh - 60px);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-top: 6px;
+}
+
+.auth__spacer {
+    flex: 1;
+}
+
+.auth__form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    align-items: center;
+}
+
+.authField {
+    width: 100%;
+    max-width: 340px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.16);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.authField:focus-within {
+    border-color: rgba(224, 122, 31, 0.95);
+    box-shadow: 0 0 0 2px rgba(224, 122, 31, 0.18);
+}
+
+.authField__meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.authField__label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 800;
+    letter-spacing: 0.2px;
+}
+
+.authField__input {
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 18px;
+    line-height: 1.2;
+    padding: 0;
+}
+
+.authField__icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-weight: 900;
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.authField__icon--ok {
+    color: rgba(87, 211, 109, 0.95);
+    border-color: rgba(87, 211, 109, 0.55);
+    background: rgba(87, 211, 109, 0.08);
+}
+
+.btn--wide {
+    width: 100%;
+    max-width: 340px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    font-size: 16px;
+}
+
+/* App CTAs (full width, stacked) */
+.actionsBar {
+    display: grid;
+    gap: 10px;
+}
+
+.actionsBar .btn {
+    width: 100%;
+}
+
+.btn--sm {
+    padding: 8px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.kv--big .kv__v {
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.price {
+    font-weight: 900;
+    letter-spacing: 0.2px;
+}
+
+/* Order item cards */
+.itemCard {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 18px;
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.itemCard__top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.itemCard__title {
+    font-weight: 900;
+    font-size: 15px;
+    line-height: 1.25;
+}
+
+.itemCard__meta {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.itemCard__badges {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.controlsGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+@media (max-width: 380px) {
+    .controlsGrid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Make forms feel like the reference */
+.btnRow .btn--wide {
+    max-width: 100%;
+}
+
+.form .btn--primary {
+    border-width: 1px;
+}
+
+.screen__headerLeft .btn--ghost {
+    padding: 10px 12px;
+    border-radius: 14px;
 }
 
 @media (min-width: 860px) {

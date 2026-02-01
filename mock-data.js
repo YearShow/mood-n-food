@@ -127,13 +127,30 @@
         }
     ];
 
+    // post-MVP: расписание смен и отчётность
+    const employees = [
+        {id: 'u-4132', fullName: 'Иванова Мария', role: 'Официант'},
+        {id: 'u-5120', fullName: 'Смирнов Артём', role: 'Официант'},
+        {id: 'u-6001', fullName: 'Кузнецова Анна', role: 'Метрдотель'}
+    ];
+
+    // date: YYYY-MM-DD, start/end: HH:MM (локальное время)
+    const shifts = [
+        {id: 's-1', employeeId: 'u-4132', date: '2026-02-01', start: '12:00', end: '20:00'},
+        {id: 's-2', employeeId: 'u-5120', date: '2026-02-01', start: '14:00', end: '22:00'},
+        {id: 's-3', employeeId: 'u-6001', date: '2026-02-01', start: '10:00', end: '18:00'},
+        {id: 's-4', employeeId: 'u-4132', date: '2026-02-02', start: '12:00', end: '20:00'}
+    ];
+
     window.__MF_PROTO__ = {
         mock: {
             categories,
             dishes,
             user,
             tables,
-            loyaltyMembers
+            loyaltyMembers,
+            employees,
+            shifts
         }
     };
 })();
